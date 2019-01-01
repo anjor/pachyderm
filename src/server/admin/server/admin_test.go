@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"path"
@@ -20,6 +22,7 @@ import (
 	"github.com/pachyderm/pachyderm/src/server/pkg/workload"
 
 	"github.com/golang/snappy"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -216,11 +219,55 @@ func TestMigrateFrom1_7(t *testing.T) {
 	c := getPachClient(t)
 	require.NoError(t, c.DeleteAll())
 
-	f, err := os.Open(path.Join(os.Getenv("GOPATH"),
-		"/src/github.com/pachyderm/pachyderm/etc/testing/migration/1_7/diagonal.dump"))
+	// Confirm that test is running against minikube
+	kubectlContext, err := tu.Cmd("kubectl", "config", "current-context").Output()
 	require.NoError(t, err)
-	require.NoError(t, c.RestoreReader(snappy.NewReader(f)))
-	require.NoError(t, f.Close())
+	if strings.TrimSpace(string(kubectlContext)) != "minikube" {
+		t.Skipf("TestMigrateFrom1_7 can only run against minikube (current "+
+			"context is %q), as it needs to copy blocks directly to object store",
+			string(kubectlContext))
+	}
+
+	// Load blocks from frozen 1.7 cluster into minikube
+	// 1. SSH into minikube
+	minikubeIP, err := tu.Cmd("minikube", "ip").Output()
+	minikubeIP = bytes.TrimSpace(minikubeIP)
+	require.NoError(t, err)
+	key, err := ioutil.ReadFile(path.Join(
+		os.Getenv("HOME"), ".minikube/machines/minikube/id_rsa"))
+	require.NoError(t, err)
+	signer, err := ssh.ParsePrivateKey(key)
+	require.NoError(t, err)
+	config := &ssh.ClientConfig{
+		User:            "docker",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+	t.Logf(fmt.Sprintf("%s:22", string(minikubeIP)))
+	sshClient, err := ssh.Dial("tcp", string(minikubeIP)+":22", config)
+	require.NoError(t, err)
+
+	// 2. copy tar-ed objects into minikube
+	objectsTarPath := path.Join(os.Getenv("GOPATH"),
+		"src/github.com/pachyderm/pachyderm/etc/testing/migration/1_7/diagonal.objects.tar")
+	objectsTar, err := os.Open(objectsTarPath)
+	require.NoError(t, err, "could not open %q; did you run "+
+		"'cd etc/testing/migration/1_7 && tar -xjf diagonal.objects.tar', as in "+
+		"etc/testing/travis.sh?", objectsTarPath)
+	sesh, err := sshClient.NewSession()
+	require.NoError(t, err)
+	sesh.Stdin, sesh.Stdout, sesh.Stderr = objectsTar, os.Stdout, os.Stderr
+	require.NoError(t, sesh.Run(
+		"sudo rm -rf /var/pachyderm/pachd/pach/block || true; "+
+			"sudo mkdir -p /var/pachyderm/pachd/pach/block && "+
+			"sudo tar -C /var/pachyderm/pachd/pach/block --strip-components=5 -xvf -"))
+
+	// Restore dumped metadata (now that objects are present)
+	md, err := os.Open(path.Join(os.Getenv("GOPATH"),
+		"src/github.com/pachyderm/pachyderm/etc/testing/migration/1_7/diagonal.metadata"))
+	require.NoError(t, err)
+	require.NoError(t, c.RestoreReader(snappy.NewReader(md)))
+	require.NoError(t, md.Close())
 
 	// Wait for final imported commit to be processed
 	commitIter, err := c.FlushCommit([]*pfs.Commit{client.NewCommit("left", "master")}, nil)
