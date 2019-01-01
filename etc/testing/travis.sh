@@ -45,7 +45,11 @@ for i in $(seq 3); do
   sleep 10
 done
 
+# install 'match' binary, used by CLI tests
 go install ./src/testing/match
+
+# unpack data used by migration tests
+( cd ./etc/testing/migration/1_7 && tar -xzjf diagonal_data.tar.bz2 )
 
 if [[ "$BUCKET" == "MISC" ]]; then
 	echo "Running misc test suite"
