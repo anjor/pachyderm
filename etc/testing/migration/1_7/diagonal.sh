@@ -140,4 +140,16 @@ pachctl_1_7 delete-commit right master~9
 pachctl_1_7 delete-commit right master~8
 pachctl_1_7 delete-commit right master~7
 
-pachctl_1_7 extract >${HERE}/diagonal.dump
+echo "Extracting metadata from Pachyderm. Note that this step occasionally"
+echo "fails due to transient encoding issues, and you may need to re-run it"
+pachctl_1_7 extract >${HERE}/diagonal.metadata
+
+echo "Extracting blocks from Pachyderm"
+( ssh \
+  -o UserKnownHostsFile=/dev/null \
+  -o StrictHostKeyChecking=no \
+  -i /home/mjs/.minikube/machines/minikube/id_rsa \
+  docker@$(minikube ip) \
+  "sudo tar -cvf - /var/pachyderm/pachd/pach/block"
+) >${HERE}/diagonal.objects.tar
+
