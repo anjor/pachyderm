@@ -65,9 +65,16 @@ func (a *apiServer) Extract(request *admin.ExtractRequest, extractServer admin.A
 		w := pbutil.NewWriter(snappyW)
 		handleOp = func(op *admin.Op) error { return w.Write(op) }
 	}
+	handleOp = func(op *admin.Op) error {
+		if op.Op1_7.Object == nil {
+			fmt.Printf(">>> [extract] %s\n", op.Op1_7)
+		}
+		return handleOp(op)
+	}
 	if !request.NoObjects {
 		w := extractObjectWriter(handleOp)
 		if err := pachClient.ListObject(func(object *pfs.Object) error {
+			fmt.Printf(">>> [extract] Object: %s\n", object)
 			if err := pachClient.GetObject(object.Hash, w); err != nil {
 				return err
 			}
