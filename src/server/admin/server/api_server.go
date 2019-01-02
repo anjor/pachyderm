@@ -385,9 +385,11 @@ func (a *apiServer) Restore(restoreServer admin.API_RestoreServer) (retErr error
 					version:               v1_7,
 				}
 				extractReader.buf.Write(op.Op1_7.Object.Value)
-				if _, _, err := pachClient.PutObject(extractReader); err != nil {
+				obj, n, err := pachClient.PutObject(extractReader)
+				if err != nil {
 					return fmt.Errorf("error putting object: %v", err)
 				}
+				fmt.Printf(">>> restoring object %q of size %d", obj.Hash, n)
 			} else {
 				if err := a.apply1_7Op(pachClient, op.Op1_7); err != nil {
 					return err
@@ -401,9 +403,11 @@ func (a *apiServer) Restore(restoreServer admin.API_RestoreServer) (retErr error
 					version:               v1_8,
 				}
 				extractReader.buf.Write(op.Op1_8.Object.Value)
-				if _, _, err := pachClient.PutObject(extractReader); err != nil {
+				obj, n, err := pachClient.PutObject(extractReader)
+				if err != nil {
 					return fmt.Errorf("error putting object: %v", err)
 				}
+				fmt.Printf(">>> restoring object %q of size %d", obj.Hash, n)
 			} else {
 				if err := a.apply1_8Op(pachClient, op.Op1_8); err != nil {
 					return err
