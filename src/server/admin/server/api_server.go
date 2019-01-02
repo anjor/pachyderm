@@ -436,7 +436,8 @@ func (a *apiServer) apply1_8Op(pachClient *client.APIClient, op *admin.Op1_8) er
 		}
 	case op.Pipeline != nil:
 		if op.Pipeline.Salt != "" {
-			op.Pipeline.Salt = "" // clear salt so we don't re-use old datum hashtrees
+			// clear salt so we don't re-use old datum hashtrees (which may have an invalid format)
+			op.Pipeline.Salt = ""
 		}
 		if _, err := pachClient.PpsAPIClient.CreatePipeline(pachClient.Ctx(), op.Pipeline); err != nil && !errutil.IsAlreadyExistError(err) {
 			return fmt.Errorf("error creating pipeline: %v", grpcutil.ScrubGRPC(err))
@@ -613,6 +614,15 @@ type extractObjectReader struct {
 }
 
 func (r *extractObjectReader) Read(p []byte) (int, error) {
+	// Read leftover bytes from prev. Read() call into 'p'
+	n, err := r.buf.Read(p)
+	if n == len(p) || err != nil {
+		return n, err // quit early if done
+	}
+	r.buf.Reset() // discard garbage, ready to refill 'r.buf'
+	p = p[n:]     // only want to fill remainder of p
+
+	// refill 'r.buf'
 	for len(p) > r.buf.Len() && !r.eof {
 		var op *admin.Op
 		if r.restoreURLReader == nil {
